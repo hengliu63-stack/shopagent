@@ -106,7 +106,7 @@ cp .env.example .env        # 填 Sandbox 的 PAYPAL_CLIENT_ID / PAYPAL_CLIENT_S
 | 商品数据 | 本地 demo 池 7 件；Channel3 未接入 |
 | LLM 解析 | 无 key 时自动降级规则版（功能完整，语义理解较弱） |
 | 批准环节 | 必须买家人工批准一次（PayPal 合规要求，非技术限制） |
-| 公开仓库 / Devpost 提交 | 尚未 push、尚未提交（早检目标 2026-11-05） |
+| 公开仓库 / Devpost 提交 | 已推送至本公开仓库；Devpost 提交待演示视频就绪后完成（早检目标 2026-11-05） |
 
 ## 目录结构
 
