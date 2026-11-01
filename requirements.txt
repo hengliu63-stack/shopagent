@@ -1,0 +1,12 @@
+# PayPal 官方当前 SDK（注意：paypalrestsdk 已废弃，不要用）
+paypal-server-sdk>=1.2.0
+# Web 框架（Week2+）
+fastapi>=0.110.0
+uvicorn>=0.29.0
+# LLM（OpenAI-compatible endpoint）
+openai>=1.30.0
+# 工具
+python-dotenv>=1.0.0
+httpx>=0.27.0
+# 测试
+pytest>=8.0.0
