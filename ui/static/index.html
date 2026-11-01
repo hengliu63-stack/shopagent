@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopAgent — 一句话 AI 购物 Agent</title>
+<style>
+  :root { --blue:#003087; --cyan:#0070e0; --bg:#f5f7fa; --card:#fff;
+          --line:#dbe2ea; --warn:#b45309; --warnbg:#fef3c7; --ok:#047857; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", "PingFang SC",
+         "Microsoft YaHei", sans-serif; background:var(--bg); color:#1f2937; }
+  header { background:var(--blue); color:#fff; padding:14px 20px;
+           display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; }
+  header .tag { font-size:13px; opacity:.85; }
+  .badge { background:var(--warnbg); color:var(--warn); border:1px solid var(--warn);
+           border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  #log { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+  .bubble-user { align-self:flex-end; background:var(--cyan); color:#fff;
+                 padding:10px 14px; border-radius:14px 14px 2px 14px; max-width:80%; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:14px 16px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .card h3 { margin:0 0 8px; font-size:15px; }
+  .muted { color:#6b7280; font-size:13px; }
+  .state { font-weight:700; color:var(--blue); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin:6px 0; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; }
+  tr.top1 { background:#ecfdf5; font-weight:600; }
+  tr.over td { color:#9ca3af; }
+  .traj { font-size:13px; background:#f0f4f8; border-radius:8px; padding:8px 10px;
+          white-space:pre-wrap; word-break:break-all; }
+  .events { font-size:12px; color:#4b5563; max-height:180px; overflow:auto;
+            border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .events div { padding:1px 0; border-bottom:1px dashed #eef2f7; }
+  .pending { border:1px solid var(--warn); background:var(--warnbg); border-radius:10px;
+             padding:10px 12px; margin-top:10px; }
+  .receipt { border:1px solid var(--ok); background:#ecfdf5; border-radius:10px;
+             padding:10px 12px; margin-top:10px; }
+  .kv { font-size:13px; line-height:1.7; word-break:break-all; }
+  button { background:var(--blue); color:#fff; border:0; border-radius:8px;
+           padding:8px 16px; font-size:14px; cursor:pointer; }
+  button.secondary { background:#e5e7eb; color:#374151; }
+  button:disabled { opacity:.5; cursor:default; }
+  .actions { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center; }
+  .actions input { width:110px; padding:7px 8px; border:1px solid var(--line);
+                   border-radius:8px; font-size:14px; }
+  form#composer { display:flex; gap:8px; }
+  form#composer input[type=text] { flex:1; padding:11px 12px; font-size:15px;
+      border:1px solid var(--line); border-radius:10px; }
+  .examples { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 16px; }
+  .examples button { background:#fff; color:var(--blue); border:1px solid var(--blue);
+                     font-size:13px; padding:6px 12px; }
+  .error { color:#b91c1c; font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ShopAgent</h1>
+  <span class="tag">Say it. Agent shops. PayPal pays.</span>
+  <span class="badge">离线演示 · 支付为 STUB 桩（非真实 PayPal 交易）</span>
+</header>
+<main>
+  <div class="examples">
+    <span class="muted" style="align-self:center">试一句：</span>
+    <button type="button" data-ex="帮我买一本 200 块以内的 Python 书">200 块以内的 Python 书</button>
+    <button type="button" data-ex="买两本 100 块以内便宜点的 Python 书">两本 100 块内便宜点（超预算）</button>
+    <button type="button" data-ex="帮我买个 $20 以内的鼠标">$20 以内的鼠标</button>
+  </div>
+  <div id="log"></div>
+  <form id="composer">
+    <input type="text" id="instruction" placeholder="说一句购物指令，例如：帮我买一本 200 块以内的 Python 书" autocomplete="off">
+    <button type="submit" id="send">发送</button>
+  </form>
+  <p class="muted">流程：意图解析 → 比价候选 → 状态轨迹 → 待批准卡片（点批准后由 stub 桩“扣款”）→ 收据卡片。
+     真实 PayPal Sandbox 链路待凭证接入，当前所有订单/收据均带 stub 标注。</p>
+</main>
+<script>
+const log = document.getElementById('log');
+const input = document.getElementById('instruction');
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function money(v) { return v == null ? '—' : '$' + Number(v).toFixed(2); }
+
+function addUser(text) {
+  const d = document.createElement('div');
+  d.className = 'bubble-user';
+  d.textContent = text;
+  log.appendChild(d);
+  d.scrollIntoView({behavior:'smooth'});
+}
+
+function rankedTable(view) {
+  if (!view.ranked || !view.ranked.length) return '';
+  const rows = view.ranked.map(r => {
+    const cls = [r.over_budget ? 'over' : '', view.decision && r.id === view.decision.id ? 'top1' : ''].join(' ');
+    return `<tr class="${cls}">
+      <td>${r.rank ?? '—'}</td>
+      <td>${esc(r.name_cn || r.name)}</td>
+      <td>${money(r.unit_price)}</td><td>×${r.quantity}</td>
+      <td>${money(r.total_price)}</td>
+      <td>${r.rating ?? '—'}</td><td>${r.sales ?? '—'}</td>
+      <td>${r.over_budget ? '超预算' : (view.decision && r.id === view.decision.id ? '✔ 已选' : '')}</td>
+    </tr>`;
+  }).join('');
+  return `<h3>比价候选</h3><table>
+    <tr><th>#</th><th>商品</th><th>单价</th><th>数量</th><th>总价</th><th>评分</th><th>销量</th><th></th></tr>
+    ${rows}</table>`;
+}
+
+function eventsList(view) {
+  if (!view.events || !view.events.length) return '';
+  const items = view.events.map(e =>
+    `<div>#${e.seq} [${esc(e.state)}] ${esc(e.event)} <span class="muted">+${e.elapsed_ms}ms</span></div>`).join('');
+  return `<h3>执行日志（审计轨迹）</h3><div class="events">${items}</div>`;
+}
+
+function pendingCard(view) {
+  const p = view.pending;
+  if (!p || view.state !== 'SUSPENDED') return '';
+  if (p.type === 'approval') {
+    return `<div class="pending"><b>待批准（合规环节）</b>
+      <div class="kv">订单 ${esc(view.order && view.order.order_id)} 已创建（stub 桩）。
+      真实流程中买家在 PayPal 批准页确认；此处点「批准」即由 stub 桩完成扣款演示。</div>
+      <div class="actions">
+        <button onclick="resume('${view.run_id}','approve',this)">✔ 批准并扣款（stub）</button>
+        <button class="secondary" onclick="resume('${view.run_id}','cancel',this)">取消</button>
+      </div></div>`;
+  }
+  if (p.type === 'budget_confirm') {
+    return `<div class="pending"><b>超预算，等确认</b>
+      <div class="kv">${esc(p.message || '')}</div>
+      <div class="actions">
+        <label class="muted">新预算（按原指令币种，留空 = 不限预算）</label>
+        <input type="number" step="0.01" min="0" id="nb-${view.run_id}">
+        <button onclick="resumeBudget('${view.run_id}',this)">确认继续</button>
+        <button class="secondary" onclick="resume('${view.run_id}','cancel',this)">取消</button>
+      </div></div>`;
+  }
+  return `<div class="pending"><b>已挂起</b><div class="kv">${esc(JSON.stringify(p))}</div></div>`;
+}
+
+function receiptCard(view) {
+  const r = view.receipt;
+  if (!r) return '';
+  return `<div class="receipt"><b>付款收据（STUB 演示收据，非真实 PayPal 收据）</b>
+    <div class="kv">
+      capture_id：${esc(r.capture_id)}<br>
+      order_id：${esc(r.order_id)}<br>
+      金额：${money(r.amount)} ${esc(r.currency || '')}<br>
+      状态：${esc(r.status)} · captured_at：${esc(r.captured_at)}
+    </div></div>`;
+}
+
+function renderAgent(view) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  let html = `<h3>Agent <span class="muted">run ${esc(view.run_id)}</span> ·
+              状态 <span class="state">${esc(view.state)}</span></h3>`;
+  if (view.intent) {
+    html += `<div class="kv">意图：query=${esc(view.intent.query)}，
+             预算=${esc(view.intent.budget_max ?? '不限')} ${esc(view.intent.currency || '')}，
+             数量=${esc(view.intent.quantity ?? 1)}，
+             偏好=${esc((view.intent.preferences || []).join(',') || '无')}</div>`;
+  }
+  html += rankedTable(view);
+  if (view.decision) {
+    html += `<div class="kv"><b>决策：</b>${esc(view.decision.name_cn || view.decision.name)} —
+             ${esc(view.decision.reason || '')}</div>`;
+  }
+  if (view.order) {
+    html += `<div class="kv"><b>订单（stub）：</b>${esc(view.order.order_id)} ·
+             ${money(view.order.amount)} ${esc(view.order.currency || '')} · ${esc(view.order.status)}</div>`;
+  }
+  html += `<h3>状态轨迹</h3><div class="traj">${esc(view.states_path)}</div>`;
+  html += eventsList(view);
+  if (view.error) html += `<div class="error">失败：${esc(view.error)}</div>`;
+  html += pendingCard(view);
+  html += receiptCard(view);
+  card.innerHTML = html;
+  log.appendChild(card);
+  card.scrollIntoView({behavior:'smooth'});
+}
+
+async function post(path, payload) {
+  const resp = await fetch(path, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)});
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+  return data;
+}
+
+async function run(instruction) {
+  addUser(instruction);
+  const send = document.getElementById('send');
+  send.disabled = true;
+  try {
+    renderAgent(await post('/api/run', {instruction}));
+  } catch (e) {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.innerHTML = `<span class="error">出错：${esc(e.message)}</span>`;
+    log.appendChild(d);
+  } finally {
+    send.disabled = false;
+    input.focus();
+  }
+}
+
+async function resume(runId, action, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    renderAgent(await post('/api/resume', {run_id: runId, action}));
+  } catch (e) {
+    alert('操作失败：' + e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function resumeBudget(runId, btn) {
+  const el = document.getElementById('nb-' + runId);
+  const v = el && el.value !== '' ? Number(el.value) : null;
+  if (btn) btn.disabled = true;
+  try {
+    renderAgent(await post('/api/resume',
+      {run_id: runId, action: 'confirm', new_budget: v}));
+  } catch (e) {
+    alert('操作失败：' + e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.getElementById('composer').addEventListener('submit', ev => {
+  ev.preventDefault();
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  run(text);
+});
+document.querySelectorAll('[data-ex]').forEach(b =>
+  b.addEventListener('click', () => run(b.dataset.ex)));
+input.focus();
+</script>
+</body>
+</html>
